@@ -8,6 +8,8 @@ import Foundation
 import AVFoundation
 import Accelerate
 import OSLog
+import CoreAudio
+import AudioToolbox
 
 /// `AudioManager` handles microphone input and audio processing for real-time transcription **on macOS**.
 ///
@@ -25,6 +27,8 @@ final class MicAudioManager: ObservableObject {
 
     // MARK: - Published Properties
     @Published private(set) var isRecording = false
+    @Published private(set) var availableInputDevices: [AudioInputDevice] = []
+    @Published private(set) var selectedDeviceID: UInt32?
 
     // MARK: - Private Properties
     private var audioEngine: AVAudioEngine?
@@ -68,11 +72,45 @@ final class MicAudioManager: ObservableObject {
     // MARK: - Initialization
     init() {
         self.audioEngine = AVAudioEngine()
+        // Restore previously selected device (if any)
+        if let saved = UserDefaults.standard.object(forKey: "selectedMicrophoneDeviceID") as? UInt32 {
+            selectedDeviceID = saved
+        }
+        refreshAvailableDevices()
         setupDeviceMonitoring()
     }
     
     deinit {
         forceCleanup()
+    }
+
+    // MARK: - Device Selection
+
+    func selectDevice(_ deviceID: UInt32?) {
+        selectedDeviceID = deviceID
+        if let id = deviceID {
+            UserDefaults.standard.set(id, forKey: "selectedMicrophoneDeviceID")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "selectedMicrophoneDeviceID")
+        }
+        // Reconfigure if already recording to pick up the new device
+        if isRecording {
+            Task { @MainActor in
+                self.performReconfigureForDeviceChange()
+            }
+        }
+    }
+
+    private func refreshAvailableDevices() {
+        let devices = audioMonitor.availableInputDevices()
+        Task { @MainActor in
+            self.availableInputDevices = devices
+            // Clear selection if the chosen device is no longer present
+            if let sel = self.selectedDeviceID, !devices.contains(where: { $0.id == sel }) {
+                self.selectedDeviceID = nil
+                UserDefaults.standard.removeObject(forKey: "selectedMicrophoneDeviceID")
+            }
+        }
     }
 
     // MARK: - Public Methods
@@ -149,6 +187,24 @@ final class MicAudioManager: ObservableObject {
         // Force-create I/O nodes in the graph
         let inputNode = engine.inputNode
         _ = engine.outputNode
+
+        // Apply selected device to the engine's IO audio unit (before starting)
+        if let deviceID = selectedDeviceID, let audioUnit = inputNode.audioUnit {
+            var mutableID = AudioDeviceID(deviceID)
+            let status = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &mutableID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+            if status == noErr {
+                logger.info("🎙️ Set input device to ID \(deviceID)")
+            } else {
+                logger.error("❌ Failed to set input device \(deviceID): \(status)")
+            }
+        }
 
         // Create internal raw audio stream (like SystemAudioManager)
         let rawStream = AsyncStream<AVAudioPCMBuffer> { continuation in
@@ -315,7 +371,13 @@ final class MicAudioManager: ObservableObject {
             guard let self else { return }
             let name = defaultInputName ?? "unknown"
             self.logger.info("🔄 Default input changed to: \(name)")
-            self.scheduleReconfigureAfterDeviceChange()
+            // Only auto-reconfigure when using the system default device
+            if self.selectedDeviceID == nil {
+                self.scheduleReconfigureAfterDeviceChange()
+            }
+        }
+        audioMonitor.onDeviceListChanged { [weak self] in
+            self?.refreshAvailableDevices()
         }
     }
 

@@ -31,6 +31,14 @@ final class CaptionViewModel: ObservableObject, CaptionViewModelProtocol {
     var isMicrophoneEnabled: Bool { audioCoordinator.isMicrophoneEnabled }
     var isSystemAudioEnabled: Bool { audioCoordinator.isSystemAudioEnabled }
 
+    // Microphone device selection
+    var availableInputDevices: [AudioInputDevice] { audioCoordinator.availableInputDevices }
+    var selectedMicDeviceID: UInt32? { audioCoordinator.selectedMicDeviceID }
+
+    func selectMicrophoneDevice(_ deviceID: UInt32?) {
+        audioCoordinator.selectMicrophoneDevice(deviceID)
+    }
+
     // Forwarded from SpeechProcessor
     var captionHistory: [CaptionEntry] { speechProcessor.captionHistory }
     var currentTranscription: String { speechProcessor.currentTranscription }

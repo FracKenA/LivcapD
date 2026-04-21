@@ -10,11 +10,11 @@ final class AudioCoordinator: ObservableObject {
     @Published private(set) var isSystemAudioEnabled: Bool = false
 
     // MARK: - Private Properties
-    
+
     // Audio managers
     private let micAudioManager = MicAudioManager()
     private var systemAudioManager: SystemAudioManager?
-    
+
     // Dynamic consumer management
     private var microphoneConsumerTask: Task<Void, Never>?
     private var systemAudioConsumerTask: Task<Void, Never>?
@@ -22,8 +22,20 @@ final class AudioCoordinator: ObservableObject {
     // Shared continuation for aggregator stream
     private var streamContinuation: AsyncStream<AudioFrameWithVAD>.Continuation?
 
+    // Propagate device-list changes from micAudioManager to observers of AudioCoordinator
+    private var cancellables = Set<AnyCancellable>()
+
     // Logging
     private let logger = Logger(subsystem: "com.livcap.audio", category: "AudioCoordinator")
+
+    // MARK: - Microphone Device Selection
+
+    var availableInputDevices: [AudioInputDevice] { micAudioManager.availableInputDevices }
+    var selectedMicDeviceID: UInt32? { micAudioManager.selectedDeviceID }
+
+    func selectMicrophoneDevice(_ deviceID: UInt32?) {
+        micAudioManager.selectDevice(deviceID)
+    }
 
     // MARK: - Source Arbitration (when both sources are enabled)
     private var activeSource: AudioSource?
@@ -37,6 +49,11 @@ final class AudioCoordinator: ObservableObject {
     
     init() {
         setupSystemAudioComponents()
+        // Forward device-list changes so UI updates automatically
+        micAudioManager.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
     
     // MARK: - Setup

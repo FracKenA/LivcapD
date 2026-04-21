@@ -152,10 +152,30 @@ struct CaptionView: View {
         HStack(spacing: 8) {
             CircularControlButton(
                 image: .system(captionViewModel.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill"),
-                helpText: "Toggle Microphone",
+                helpText: "Toggle Microphone (right-click to select device)",
                 isActive: captionViewModel.isMicrophoneEnabled,
                 action: { captionViewModel.toggleMicrophone() }
             )
+            .contextMenu {
+                Button("System Default") {
+                    captionViewModel.selectMicrophoneDevice(nil)
+                }
+                .disabled(captionViewModel.selectedMicDeviceID == nil)
+
+                if !captionViewModel.availableInputDevices.isEmpty {
+                    Divider()
+                    ForEach(captionViewModel.availableInputDevices) { device in
+                        Button {
+                            captionViewModel.selectMicrophoneDevice(device.id)
+                        } label: {
+                            Label(
+                                device.name,
+                                systemImage: captionViewModel.selectedMicDeviceID == device.id ? "checkmark" : ""
+                            )
+                        }
+                    }
+                }
+            }
 
             CircularControlButton(
                 image: .custom(captionViewModel.isSystemAudioEnabled ? "Laptop.wave" : "Laptop.wave.slash"),
